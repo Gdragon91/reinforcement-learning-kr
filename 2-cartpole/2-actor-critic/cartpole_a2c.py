@@ -2,10 +2,12 @@ import sys
 import gym
 import pylab
 import numpy as np
+import argparse
 from keras.layers import Dense
 from keras.models import Sequential
 from keras.optimizers import Adam
 from keras import backend as K
+from gym import wrappers
 
 EPISODES = 1000
 
@@ -15,6 +17,7 @@ class A2CAgent:
     def __init__(self, state_size, action_size):
         self.render = False
         self.load_model = False
+        self.skip_train = False
         # 상태와 행동의 크기 정의
         self.state_size = state_size
         self.action_size = action_size
@@ -50,7 +53,7 @@ class A2CAgent:
         critic = Sequential()
         critic.add(Dense(24, input_dim=self.state_size, activation='relu',
                          kernel_initializer='he_uniform'))
-        critic.add(Dense(24, input_dim=self.state_size, activation='relu',
+        critic.add(Dense(24, activation='relu',
                          kernel_initializer='he_uniform'))
         critic.add(Dense(self.value_size, activation='linear',
                          kernel_initializer='he_uniform'))
@@ -109,9 +112,11 @@ class A2CAgent:
         self.critic_updater([state, target])
 
 
-if __name__ == "__main__":
+def train():
     # CartPole-v1 환경, 최대 타임스텝 수가 500
     env = gym.make('CartPole-v1')
+    # Record training
+    env = wrappers.Monitor(env, './cartpole_upload', force=True)
     # 환경으로부터 상태와 행동의 크기를 받아옴
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
@@ -137,7 +142,8 @@ if __name__ == "__main__":
             # 에피소드가 중간에 끝나면 -100 보상
             reward = reward if not done or score == 499 else -100
 
-            agent.train_model(state, action, reward, next_state, done)
+            if agent.skip_train is not True:
+                agent.train_model(state, action, reward, next_state, done)
 
             score += reward
             state = next_state
@@ -151,9 +157,72 @@ if __name__ == "__main__":
                 pylab.savefig("./save_graph/cartpole_a2c.png")
                 print("episode:", e, "  score:", score)
 
+                # 이전 3개 에피소드의 점수 평균이 490보다 크면 학습 skip
+                if np.mean(scores[-min(3, len(scores)):]) > 490:
+                    agent.skip_train = True
+                else:
+                    agent.skip_train = False
+
                 # 이전 10개 에피소드의 점수 평균이 490보다 크면 학습 중단
-                if np.mean(scores[-min(10, len(scores)):]) > 490:
+                if np.mean(scores[-min(100, len(scores)):]) > 490:
                     agent.actor.save_weights("./save_model/cartpole_actor.h5")
-                    agent.critic.save_weights(
-                        "./save_model/cartpole_critic.h5")
+                    agent.critic.save_weights("./save_model/cartpole_critic.h5")
+                    env.close()
                     sys.exit()
+    env.close()
+
+
+def play():
+    # CartPole-v1 환경, 최대 타임스텝 수가 500
+    env = gym.make('CartPole-v1')
+    # 환경으로부터 상태와 행동의 크기를 받아옴
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.n
+
+    # 액터-크리틱(A2C) 에이전트 생성
+    agent = A2CAgent(state_size, action_size)
+
+    scores, episodes = [], []
+
+    agent.actor.load_weights("./save_model/cartpole_actor.h5")
+
+    for e in range(EPISODES):
+        done = False
+        score = 0
+        state = env.reset()
+        state = np.reshape(state, [1, state_size])
+
+        while not done:
+            env.render()
+
+            action = agent.get_action(state)
+            next_state, reward, done, info = env.step(action)
+            next_state = np.reshape(next_state, [1, state_size])
+            score += reward
+            state = next_state
+
+            if done:
+                # 에피소드마다 학습 결과 출력
+                scores.append(score)
+                episodes.append(e)
+                pylab.plot(episodes, scores, 'b')
+                pylab.savefig("./save_graph/cartpole_play.png")
+                print("episode:", e, "  score:", score)
+
+                # 이전 10개 에피소드의 점수 평균이 490보다 크면 학습 중단
+                if np.mean(scores[-min(100, len(scores)):]) > 490 and len(scores) > 100:
+                    env.close()
+                    sys.exit()
+    env.close()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--task', help='task to perform',
+                        choices=['play', 'train'], default='train')
+    args = parser.parse_args()
+
+    if args.task == 'train':
+        train()
+    else:
+        play()

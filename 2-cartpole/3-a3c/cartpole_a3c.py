@@ -227,7 +227,7 @@ class Agent(threading.Thread):
         self.avg_loss = 0
 
         # 모델 업데이트 주기
-        self.t_max = 10
+        self.t_max = 5
         self.t = 0
 
     def run(self):
@@ -274,11 +274,14 @@ class Agent(threading.Thread):
                     self.t = 0
 
                 if done:
+                    # change model update interval by score
+                    self.t_max = max(min(20, int(score/10)), 5)
+
                     # 각 에피소드 당 학습 정보를 기록
                     scores.append(score)
                     episode += 1
                     print("episode:", episode, "  score:", score, "  step:",
-                          step)
+                          step, "t_max", self.t_max)
 
                     # 이전 3개 에피소드의 점수 평균이 490보다 크면 학습 skip
                     if np.mean(scores[-min(2, len(scores)):]) > 490 and skip_train is False:
